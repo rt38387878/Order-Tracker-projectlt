@@ -1,0 +1,100 @@
+
+<!DOCTYPE html>
+<html lang="fa" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>Whale Order Tracker</title>
+  <style>
+    body { background: #121212; color: #e0e0e0; font-family: sans-serif; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; text-align: center; }
+    .buy { color: #00e676; }
+    .sell { color: #ff3d00; }
+  </style>
+
+let recentOrders = [];
+
+function updateAIAnalysis(dir, volume) {
+  if (recentOrders.length > 50) recentOrders.shift();
+  recentOrders.push({ dir, volume });
+
+  let buyVol = 0, sellVol = 0;
+  for (const ord of recentOrders) {
+    if (ord.dir === 'buy') buyVol += ord.volume;
+    else sellVol += ord.volume;
+  }
+
+  const total = buyVol + sellVol;
+  if (total === 0) return;
+
+  const buyPercent = (buyVol / total) * 100;
+  const resultText = `در ۵۰ سفارش اخیر، ${buyPercent.toFixed(1)}٪ حجم در سمت خرید بوده. ` +
+    (buyPercent > 60 ? "🔼 روند: قدرت در سمت خرید" :
+     buyPercent < 40 ? "🔽 روند: قدرت در سمت فروش" :
+     "➖ روند: متعادل");
+
+  document.getElementById("analysis").textContent = resultText;
+}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>Whale Order Tracker</h1>
+  <label>جفت‌ارز:
+    <select id="pair">
+      <option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option>
+    </select>
+  </label>
+  <label>حداقل سفارش (USDT): <input type="number" id="minSize" value="50000"></label>
+  <p id="status">در حال اتصال...</p>
+  <p id="analysis">در حال تحلیل سفارش‌ها...</p>
+  <canvas id="chart" height="200"></canvas>
+  <table><thead><tr><th>جهت</th><th>قیمت</th><th>حجم</th><th>زمان</th></tr></thead>
+    <tbody id="orders"></tbody>
+  </table>
+
+  <script>
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: 'حجم سفارش‌ها', data: [], backgroundColor: [] }] },
+      options: { scales: { x: { display: false }, y: { beginAtZero: true } } }
+    });
+
+    let ws;
+    function connect() {
+      const pair = document.getElementById('pair').value.toLowerCase();
+      ws && ws.close();
+      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${pair}@aggTrade`);
+      ws.onopen = () => document.getElementById('status').textContent = 'متصل به ' + pair;
+      ws.onmessage = msg => {
+        const data = JSON.parse(msg.data);
+        const price = parseFloat(data.p), qty = parseFloat(data.q);
+        const usdVol = price * qty;
+        const min = parseFloat(document.getElementById('minSize').value);
+        if (usdVol >= min) {
+          const dir = data.m ? 'sell' : 'buy';
+          const row = document.getElementById('orders').insertRow(0);
+          row.innerHTML = `<td class="${dir}">${dir.toUpperCase()}</td><td>${price}</td><td>${qty}</td><td>${new Date().toLocaleTimeString()}</td>`;
+          chart.data.labels.push(new Date().toLocaleTimeString());
+          chart.data.datasets[0].data.push(usdVol);
+          chart.data.datasets[0].backgroundColor.push(dir === 'buy' ? '#00e676' : '#ff3d00');
+          chart.update();
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].backgroundColor.shift();
+          }
+        }
+      };
+    }
+
+    document.getElementById('pair').addEventListener('change', connect);
+    document.getElementById('minSize').addEventListener('change', () => {
+      document.getElementById('orders').innerHTML = '';
+      chart.data.labels = []; chart.data.datasets[0].data = []; chart.data.datasets[0].backgroundColor = [];
+    });
+
+    connect();
+  </script>
+</body>
+</html>
